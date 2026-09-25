@@ -1,0 +1,19 @@
+# Build artifacts
+**/bin/
+**/obj/
+publish/
+
+# IDE
+.vs/
+.idea/
+*.user
+
+# OS
+.DS_Store
+
+# Locally-trusted certs (e.g. a corporate TLS-inspecting proxy's root CA) go here — ignored by
+# default so a *different* org's cert never gets committed by accident. zscaler-root-ca.pem is
+# explicitly tracked below: see certs/README.md for why that one's safe to commit.
+certs/*.pem
+certs/*.crt
+!certs/zscaler-root-ca.pem

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/integration-test/">
+    <Project Path="integration-test/fraud-rule-engine-service.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/unit-test/">
+    <Project Path="unit-test/fraud-rule-engine-service.UnitTests.csproj" />
+  </Folder>
+  <Project Path="fraud-rule-engine-service/fraud-rule-engine-service.csproj" />
+</Solution>

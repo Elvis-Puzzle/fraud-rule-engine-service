@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: fraud_rule_engine
+      POSTGRES_USER: fraud_rule_engine
+      POSTGRES_PASSWORD: fraud_rule_engine_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./scripts/init-db:/docker-entrypoint-initdb.d
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fraud_rule_engine -d fraud_rule_engine"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: apache/kafka:3.9.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:19092,CONTROLLER://kafka:19093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:19093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["dotnet", "fraud-rule-engine-service.dll", "-m"]
+    environment:
+      ConnectionStrings__ReadWrite: "Host=postgres;Port=5432;Database=fraud_rule_engine;Username=fraud_rule_engine;Password=fraud_rule_engine_dev"
+      ConnectionStrings__ReadOnly: "Host=postgres;Port=5432;Database=fraud_rule_engine;Username=fraud_rule_engine_reader;Password=fraud_rule_engine_reader_dev"
+      Kafka__BootstrapServers: "kafka:19092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fraud-rule-engine-service:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__ReadWrite: "Host=postgres;Port=5432;Database=fraud_rule_engine;Username=fraud_rule_engine;Password=fraud_rule_engine_dev"
+      ConnectionStrings__ReadOnly: "Host=postgres;Port=5432;Database=fraud_rule_engine;Username=fraud_rule_engine_reader;Password=fraud_rule_engine_reader_dev"
+      Kafka__BootstrapServers: "kafka:19092"
+      Authentication__Schemes__Bearer__ValidIssuer: "dotnet-user-jwts"
+      Authentication__Schemes__Bearer__ValidAudiences__0: "http://localhost:8080"
+    # Mounts the dev JWT signing key created on the host by `dotnet user-jwts create` (see README)
+    # so a token minted on the host validates inside the container too. Never do this with a real
+    # secrets store — this only works because dev JWT keys are throwaway and local-machine-scoped.
+    volumes:
+      - ${HOME}/.microsoft/usersecrets/e2a0d8dd-f22e-42cd-8468-41344b7a7b47:/home/app/.microsoft/usersecrets/e2a0d8dd-f22e-42cd-8468-41344b7a7b47:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:
