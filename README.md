@@ -4,11 +4,6 @@ Consumes categorized transaction events from Kafka, evaluates each transaction a
 configurable set of fraud rules, persists any resulting fraud case, and exposes a retrieval API
 for querying, filtering, and reporting on those cases.
 
-Built for the internal promotion Backend project brief ("Fraud Rule Engine Service"): *"Create a
-system that processes categorized transaction events and flags potential fraud. Apply a set of
-fraud rules per transaction based on different criteria and then store them in a data store. Allow
-the retrieval of this data via an API."*
-
 ## Architecture
 
 ```
@@ -70,11 +65,11 @@ FraudCaseQueryService ──▶ ApplicationReadOnlyContext (Postgres, read-only 
 ### 1. Mint a local dev JWT (once)
 
 The API requires a bearer token. `dotnet user-jwts` (built into the .NET SDK) generates one signed
-with a throwaway, machine-local dev key — no real identity provider needed for local/demo use.
+with a throwaway, machine-local dev key — no real identity provider needed for local development.
 
 ```bash
 cd src/fraud-rule-engine-service
-dotnet user-jwts create --name docker-demo --audience http://localhost:8080 --role FraudAnalyst
+dotnet user-jwts create --name local-dev --audience http://localhost:8080 --role FraudAnalyst
 ```
 
 Copy the printed `Token:` value — you'll pass it as `Authorization: Bearer <token>` on every
@@ -179,13 +174,13 @@ velocity windows, blacklists, etc.) — see `Domain/Rules/FraudRuleOptions.cs` f
 defaults. Kafka topics/connection and the Postgres connection strings are under `Kafka` and
 `ConnectionStrings` respectively.
 
-## What's intentionally out of scope for this demo
+## Roadmap
 
-- **A managed identity provider** (e.g. Keycloak, Auth0, Cognito) — replaced with `dotnet user-jwts`
-  for local/demo use; the app only depends on standard JWT bearer validation, so swapping the
-  issuer is a configuration change, not a code change.
-- **Secrets manager / IAM database auth** (e.g. AWS Secrets Manager, RDS IAM tokens) — replaced
-  with plain connection strings for local/demo use.
+- **A managed identity provider** (e.g. Keycloak, Auth0, Cognito) instead of `dotnet user-jwts` —
+  the app only depends on standard JWT bearer validation, so swapping the issuer is a
+  configuration change, not a code change.
+- **Secrets manager / IAM database auth** (e.g. AWS Secrets Manager, RDS IAM tokens) instead of
+  plain connection strings.
 - **A Kafka-broker-backed integration test** — the messaging layer has full unit coverage with a
-  mocked consumer (see Testing below), but no test yet spins up a real broker via Testcontainers
+  mocked consumer (see Testing above), but no test yet spins up a real broker via Testcontainers
   the way the Postgres tests do.
