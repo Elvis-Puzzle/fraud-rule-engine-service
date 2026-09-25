@@ -70,10 +70,12 @@ with a throwaway, machine-local dev key — no real identity provider needed for
 ```bash
 cd src/fraud-rule-engine-service
 dotnet user-jwts create --name local-dev --audience http://localhost:8080 --role FraudAnalyst
+cd ../..
 ```
 
 Copy the printed `Token:` value — you'll pass it as `Authorization: Bearer <token>` on every
-request below.
+request below. The `cd ../..` returns you to the repo root, where every command below assumes
+you are.
 
 ### 2. Run everything in Docker
 
@@ -142,11 +144,20 @@ docker compose down -v
 
 ### Running without Docker
 
+This runs the API process directly via the .NET SDK — Postgres and Kafka still need to be
+running somewhere, most simply by starting just those two from the same compose file:
+
 ```bash
+docker compose up -d postgres kafka
 cd src/fraud-rule-engine-service
-dotnet run -- -m     # apply migrations against a local Postgres (see appsettings.Development.json)
-dotnet run            # start the API
+dotnet run -- -m     # apply migrations against the connection strings in appsettings.Development.json
+dotnet run            # start the API — listens on http://localhost:5138, not :8080 (see launchSettings.json)
 ```
+
+Note the different port: minting a token still works the same way (`--audience` only needs to
+match `ValidAudiences` in configuration, not the actual port), but point `curl`/Swagger at `:5138`
+instead of `:8080` when running this way. `dotnet run` runs in the foreground — `Ctrl+C` to stop
+it, then `cd ../..` to return to the repo root before continuing.
 
 ## Testing
 
