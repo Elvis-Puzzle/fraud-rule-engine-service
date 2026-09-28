@@ -1,10 +1,44 @@
 # Fraud Rule Engine Service
 
+![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
+![Kafka](https://img.shields.io/badge/Kafka-3.9-231F20?logo=apachekafka&logoColor=white)
+![Postgres](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-67%20passing-brightgreen)
+
 Consumes categorized transaction events from Kafka, evaluates each transaction against a
 configurable set of fraud rules, persists any resulting fraud case, and exposes a retrieval API
 for querying, filtering, and reporting on those cases.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Prerequisites](#prerequisites)
+- [Quick Start (Docker)](#quick-start-docker)
+- [Running Without Docker](#running-without-docker)
+- [API Reference](#api-reference)
+- [Testing](#testing)
+- [Configuration](#configuration)
+- [Roadmap / Out of Scope](#roadmap--out-of-scope)
+
+## Overview
+
+| | |
+|---|---|
+| **Input** | `transaction-categorized-events` (Kafka) |
+| **Output** | `fraud-case-raised-events` (Kafka) + queryable REST API |
+| **Rules engine** | 8 independent, configurable fraud rules (see [Configuration](#configuration)) |
+| **Storage** | PostgreSQL, with a read/write role split for least-privilege querying |
+| **Auth** | JWT bearer tokens, with role-based access on write endpoints |
+
 ## Architecture
+
+The service has two independent paths that only meet at the database: an **ingestion path**
+(Kafka → rule evaluation → persistence) and a **retrieval path** (REST API → read-only queries).
+
+### Ingestion & evaluation path
 
 ```
 Kafka (transaction-categorized-events)
@@ -20,47 +54,84 @@ KafkaConsumerWorker ──▶ ServiceMessageHandler ──▶ EventHandlerRegist
                                                     ▼                              ▼                            ▼
                                      ApplicationReadWriteContext         fraud-case-raised-events        (structured logs)
                                         (Postgres, write role)                (Kafka, outbound)
+```
 
+### Retrieval path
+
+```
 Controllers (FraudCasesController / RulesController)
         │
         ▼
 FraudCaseQueryService ──▶ ApplicationReadOnlyContext (Postgres, read-only role)
 ```
 
-- **Rule engine** (`Domain/Rules`): eight independent, unit-testable rules (`IFraudRule`), each
-  looking only at the current transaction plus a bounded window of the account's recent history —
-  no rule talks to Kafka or the database directly.
-  - `HIGH_VALUE`, `VELOCITY`, `STRUCTURING`, `IMPOSSIBLE_TRAVEL`, `UNUSUAL_HOUR`,
-    `NEW_PAYEE_LARGE_TRANSFER`, `BLACKLISTED_MERCHANT`, `DUPLICATE`
-  - Thresholds are all configurable via the `FraudRules` section in `appsettings.json` — no
-    redeploy needed to tune risk appetite.
-  - `GET /api/v1/rules` lists every registered rule for transparency/auditing.
-- **Messaging** (`Kafka/`): consumes `transaction-categorized-events`, dispatches by the
-  `event-type` header via an `EventHandlerRegistry` (so adding a new inbound event type is just
-  registering another `IServiceEventHandler`, no dispatcher changes). On a handler failure, the
-  message — with its original headers plus the error — is routed to a DLQ topic rather than
-  blocking the partition as a poison pill; if the DLQ publish itself fails, the offset is left
-  uncommitted (retried on restart) rather than crashing the host. Kafka is at-least-once, so
-  redelivery of an already-processed transaction is detected and answered from the existing
-  result rather than being re-evaluated (`FraudEvaluationService.EvaluateAsync`). Raised fraud
-  cases are published to `fraud-case-raised-events` for downstream consumers (case management,
-  notifications, etc.).
-- **Persistence** (`Persistence/`): EF Core over Postgres, with a read/write split — the write
-  path uses a normal role, the retrieval API queries through a separate, least-privilege
-  **read-only** Postgres role that can only ever `SELECT` (see `scripts/init-db`).
-- **Retrieval API** (`Controllers/`): `GET /api/v1/fraud-cases` (filter by account, customer,
-  severity, status, rule, date range; paginated), `GET /api/v1/fraud-cases/{id}`,
-  `GET /api/v1/fraud-cases/by-transaction/{transactionId}`, `GET /api/v1/fraud-cases/summary`
-  (aggregate counts by severity/rule for dashboards), `PATCH /api/v1/fraud-cases/{id}/status`
-  (investigation workflow — requires the `FraudAnalyst` role, not just any authenticated caller).
-  Every endpoint requires a JWT bearer token.
+### Components at a glance
+
+| Component | Responsibility | Location |
+|---|---|---|
+| `KafkaConsumerWorker` | Long-running background consumer; owns commit/DLQ/crash-guard logic | `Kafka/KafkaConsumerWorker.cs` |
+| `ServiceMessageHandler` | Deserialises the raw Kafka message, reads the `event-type` header | `Kafka/ServiceMessageHandler.cs` |
+| `EventHandlerRegistry` | Dispatches to the matching `IServiceEventHandler` by event type | `Kafka/EventHandlerRegistry.cs` |
+| `TransactionCategorizedEventHandler` | Validates the event, hands it to the evaluation service | `Kafka/Handlers/TransactionCategorizedEventHandler.cs` |
+| `FraudEvaluationService` | Runs every `IFraudRule`, aggregates results, persists, publishes | `Service/FraudEvaluationService.cs` |
+| `IFraudRule` implementations | One class per fraud check, independently unit-tested | `Domain/Rules/` |
+| `ApplicationReadWriteContext` | EF Core context used for the write path (evaluation results) | `Persistence/ApplicationReadWriteContext.cs` |
+| `ApplicationReadOnlyContext` | EF Core context used for the retrieval API, backed by a `SELECT`-only DB role | `Persistence/ApplicationReadOnlyContext.cs` |
+| `FraudCasesController` / `RulesController` | REST API surface | `Controllers/` |
+| `FraudCaseQueryService` | Filtering/pagination/aggregation logic behind the retrieval API | `Service/FraudCaseQueryService.cs` |
+
+### Key design decisions
+
+#### Rule engine (`Domain/Rules`)
+
+Eight independent, unit-testable rules (`IFraudRule`), each looking only at the current
+transaction plus a bounded window of the account's recent history — no rule talks to Kafka or the
+database directly.
+
+`HIGH_VALUE` · `VELOCITY` · `STRUCTURING` · `IMPOSSIBLE_TRAVEL` · `UNUSUAL_HOUR` ·
+`NEW_PAYEE_LARGE_TRANSFER` · `BLACKLISTED_MERCHANT` · `DUPLICATE`
+
+- Thresholds are all configurable via the `FraudRules` section in `appsettings.json` — no
+  redeploy needed to tune risk appetite.
+- `GET /api/v1/rules` lists every registered rule for transparency/auditing.
+
+#### Messaging (`Kafka/`)
+
+- Consumes `transaction-categorized-events`, dispatches by the `event-type` header via an
+  `EventHandlerRegistry` (so adding a new inbound event type is just registering another
+  `IServiceEventHandler`, no dispatcher changes).
+- On a handler failure, the message — with its original headers plus the error — is routed to a
+  DLQ topic rather than blocking the partition as a poison pill; if the DLQ publish itself fails,
+  the offset is left uncommitted (retried on restart) rather than crashing the host.
+- Kafka is at-least-once, so redelivery of an already-processed transaction is detected and
+  answered from the existing result rather than being re-evaluated
+  (`FraudEvaluationService.EvaluateAsync`).
+- Raised fraud cases are published to `fraud-case-raised-events` for downstream consumers (case
+  management, notifications, etc.).
+
+#### Persistence (`Persistence/`)
+
+EF Core over Postgres, with a read/write split — the write path uses a normal role, the retrieval
+API queries through a separate, least-privilege **read-only** Postgres role that can only ever
+`SELECT` (see `scripts/init-db`).
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Runtime | .NET 10 / ASP.NET Core |
+| Messaging | Apache Kafka 3.9 (KRaft mode) |
+| Database | PostgreSQL 16, EF Core |
+| Auth | JWT bearer (`dotnet user-jwts` for local dev) |
+| Containerization | Docker, Docker Compose v2 |
+| Testing | xUnit, Shouldly, Testcontainers |
 
 ## Prerequisites
 
 - .NET 10 SDK
 - Docker (with Compose v2)
 
-## Running it
+## Quick Start (Docker)
 
 ### 1. Mint a local dev JWT (once)
 
@@ -75,7 +146,7 @@ cd ../..
 
 Copy the printed `Token:` value — you'll pass it as `Authorization: Bearer <token>` on every
 request below. The `cd ../..` returns you to the repo root, where every command below assumes
-you are.
+you are there.
 
 ### 2. Run everything in Docker
 
@@ -142,7 +213,7 @@ Swagger UI is at **http://localhost:8080/swagger** (non-Production environments 
 docker compose down -v
 ```
 
-### Running without Docker
+## Running Without Docker
 
 This runs the API process directly via the .NET SDK — Postgres and Kafka still need to be
 running somewhere, most simply by starting just those two from the same compose file:
@@ -158,6 +229,21 @@ Note the different port: minting a token still works the same way (`--audience` 
 match `ValidAudiences` in configuration, not the actual port), but point `curl`/Swagger at `:5138`
 instead of `:8080` when running this way. `dotnet run` runs in the foreground — `Ctrl+C` to stop
 it, then `cd ../..` to return to the repo root before continuing.
+
+## API Reference
+
+All endpoints require a JWT bearer token (`Authorization: Bearer <token>`).
+
+| Method | Endpoint | Description | Role required |
+|---|---|---|---|
+| `GET` | `/api/v1/rules` | List every registered fraud rule | any authenticated caller |
+| `GET` | `/api/v1/fraud-cases` | List/filter fraud cases (account, customer, severity, status, rule, date range; paginated) | any authenticated caller |
+| `GET` | `/api/v1/fraud-cases/{id}` | Get a single fraud case by ID | any authenticated caller |
+| `GET` | `/api/v1/fraud-cases/by-transaction/{transactionId}` | Get the fraud case (if any) for a transaction | any authenticated caller |
+| `GET` | `/api/v1/fraud-cases/summary` | Aggregate counts by severity/rule, for dashboards | any authenticated caller |
+| `PATCH` | `/api/v1/fraud-cases/{id}/status` | Transition a case's investigation status | `FraudAnalyst` |
+| `GET` | `/health/liveness` | Liveness probe | none |
+| `GET` | `/health/readiness` | Readiness probe (checks DB/Kafka) | none |
 
 ## Testing
 
@@ -185,7 +271,10 @@ velocity windows, blacklists, etc.) — see `Domain/Rules/FraudRuleOptions.cs` f
 defaults. Kafka topics/connection and the Postgres connection strings are under `Kafka` and
 `ConnectionStrings` respectively.
 
-## Roadmap
+## Roadmap 
+
+The following were deliberately left out to keep the project focused — each is a conscious
+trade-off, not an oversight, and the reasoning behind leaving it out is included below.
 
 - **A managed identity provider** (e.g. Keycloak, Auth0, Cognito) instead of `dotnet user-jwts` —
   the app only depends on standard JWT bearer validation, so swapping the issuer is a
