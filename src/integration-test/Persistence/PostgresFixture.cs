@@ -11,8 +11,7 @@ namespace fraud_rule_engine_service.IntegrationTests.Persistence;
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("fraud_rule_engine")
         .WithUsername("fraud_rule_engine")
         .WithPassword("fraud_rule_engine")
