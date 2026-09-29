@@ -167,6 +167,13 @@ TLS-inspecting proxy, see `certs/README.md`.
 This starts Postgres, a single-node Kafka broker (KRaft mode), runs EF Core migrations via a
 one-shot `migrate` service, and then the API on **http://localhost:8080**.
 
+Optionally, browse Kafka topics/messages visually via [Kafka UI](https://github.com/provectus/kafka-ui)
+on a separate `tools` profile:
+
+```bash
+docker compose --profile tools up -d kafka-ui   # then open http://localhost:8081
+```
+
 Check it's up:
 
 ```bash
