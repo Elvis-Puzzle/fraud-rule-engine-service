@@ -4,7 +4,7 @@
 ![Kafka](https://img.shields.io/badge/Kafka-3.9-231F20?logo=apachekafka&logoColor=white)
 ![Postgres](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-67%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-68%20passing-brightgreen)
 
 Consumes categorized transaction events from Kafka, evaluates each transaction against a
 configurable set of fraud rules, persists any resulting fraud case, and exposes a retrieval API
@@ -21,7 +21,7 @@ for querying, filtering, and reporting on those cases.
 - [API Reference](#api-reference)
 - [Testing](#testing)
 - [Configuration](#configuration)
-- [Roadmap / Out of Scope](#roadmap--out-of-scope)
+- [Roadmap & Known Trade-offs](#roadmap--known-trade-offs)
 
 ## Overview
 
@@ -245,12 +245,16 @@ All endpoints require a JWT bearer token (`Authorization: Bearer <token>`).
 | `GET` | `/health/liveness` | Liveness probe | none |
 | `GET` | `/health/readiness` | Readiness probe (checks DB/Kafka) | none |
 
+A ready-to-import [Insomnia](https://insomnia.rest/) collection covering every endpoint above
+(including a side-by-side 401-vs-200 auth demo) is available at
+[`insomnia/fraud-rule-engine-service.insomnia.json`](insomnia/fraud-rule-engine-service.insomnia.json).
+
 ## Testing
 
 ```bash
 cd src
 dotnet test unit-test/fraud-rule-engine-service.UnitTests.csproj         # 62 tests, no external deps
-dotnet test integration-test/fraud-rule-engine-service.IntegrationTests.csproj  # 5 tests, spins up a real Postgres via Testcontainers — needs Docker
+dotnet test integration-test/fraud-rule-engine-service.IntegrationTests.csproj  # 6 tests, spins up real Postgres + Kafka containers via Testcontainers — needs Docker
 ```
 
 Unit tests cover every rule's trigger/no-trigger boundaries (including the `UnusualHourRule`
@@ -262,7 +266,11 @@ itself: `EventHandlerRegistry`'s dispatch/duplicate-registration behaviour, `Ser
 be injected in tests, rather than requiring a real broker). Integration tests exercise the
 repositories against a real Postgres container rather than an in-memory provider, so they catch
 provider-specific issues (naming convention, precision, migrations) that an in-memory double
-would hide.
+would hide. One integration test also spins up a real Kafka broker (via `Testcontainers.Kafka`)
+and drives the full pipeline end-to-end — publish → `KafkaConsumerWorker` consumes → fraud
+evaluation → Postgres persistence → `fraud-case-raised-events` republished — using the same DI
+wiring (`AddPersistence`, `AddKafkaMessaging`, etc.) as the running service, rather than
+hand-built test doubles.
 
 ## Configuration
 
@@ -271,16 +279,10 @@ velocity windows, blacklists, etc.) — see `Domain/Rules/FraudRuleOptions.cs` f
 defaults. Kafka topics/connection and the Postgres connection strings are under `Kafka` and
 `ConnectionStrings` respectively.
 
-## Roadmap 
-
-The following were deliberately left out to keep the project focused — each is a conscious
-trade-off, not an oversight, and the reasoning behind leaving it out is included below.
+## Roadmap & Known Trade-offs
 
 - **A managed identity provider** (e.g. Keycloak, Auth0, Cognito) instead of `dotnet user-jwts` —
   the app only depends on standard JWT bearer validation, so swapping the issuer is a
   configuration change, not a code change.
 - **Secrets manager / IAM database auth** (e.g. AWS Secrets Manager, RDS IAM tokens) instead of
   plain connection strings.
-- **A Kafka-broker-backed integration test** — the messaging layer has full unit coverage with a
-  mocked consumer (see Testing above), but no test yet spins up a real broker via Testcontainers
-  the way the Postgres tests do.

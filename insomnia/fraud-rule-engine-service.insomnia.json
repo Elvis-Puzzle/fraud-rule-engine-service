@@ -1,0 +1,194 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-09-29T00:00:00.000Z",
+  "__export_source": "insomnia.desktop.app:v8.6.0",
+  "resources": [
+    {
+      "_id": "wrk_fraud_rule_engine",
+      "_type": "workspace",
+      "parentId": null,
+      "name": "Fraud Rule Engine Service",
+      "description": "Local demo collection: health checks, auth (401 vs 200), and the full fraud-cases retrieval API.",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "parentId": "wrk_fraud_rule_engine",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:8080",
+        "token": "PASTE_YOUR_DOTNET_USER_JWTS_TOKEN_HERE",
+        "fraud_case_id": "00000000-0000-0000-0000-000000000000",
+        "transaction_id": "txn-blacklist-1"
+      },
+      "dataPropertyOrder": {
+        "&": ["base_url", "token", "fraud_case_id", "transaction_id"]
+      },
+      "color": null,
+      "isPrivate": false,
+      "metaSortKey": 1
+    },
+
+    {
+      "_id": "fld_health",
+      "_type": "request_group",
+      "parentId": "wrk_fraud_rule_engine",
+      "name": "1. Health (no auth)",
+      "description": "Confirms the app and its dependencies (DB/Kafka) are reachable. What a k8s-style deployment would poll.",
+      "metaSortKey": 1
+    },
+    {
+      "_id": "req_health_liveness",
+      "_type": "request",
+      "parentId": "fld_health",
+      "name": "Liveness",
+      "method": "GET",
+      "url": "{{ _.base_url }}/health/liveness",
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 1
+    },
+    {
+      "_id": "req_health_readiness",
+      "_type": "request",
+      "parentId": "fld_health",
+      "name": "Readiness",
+      "method": "GET",
+      "url": "{{ _.base_url }}/health/readiness",
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 2
+    },
+
+    {
+      "_id": "fld_auth_demo",
+      "_type": "request_group",
+      "parentId": "wrk_fraud_rule_engine",
+      "name": "2. Auth demo (401 vs 200)",
+      "description": "Run these back-to-back to show the 401 -> 200 contrast live.",
+      "metaSortKey": 2
+    },
+    {
+      "_id": "req_rules_no_token",
+      "_type": "request",
+      "parentId": "fld_auth_demo",
+      "name": "Rules — no token (expect 401)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/rules",
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 1
+    },
+    {
+      "_id": "req_rules_with_token",
+      "_type": "request",
+      "parentId": "fld_auth_demo",
+      "name": "Rules — with token (expect 200)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/rules",
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 2
+    },
+
+    {
+      "_id": "fld_fraud_cases",
+      "_type": "request_group",
+      "parentId": "wrk_fraud_rule_engine",
+      "name": "3. Fraud Cases retrieval API",
+      "description": "All require a bearer token; the status update additionally requires the FraudAnalyst role.",
+      "metaSortKey": 3
+    },
+    {
+      "_id": "req_cases_search",
+      "_type": "request",
+      "parentId": "fld_fraud_cases",
+      "name": "Search / filter (paginated)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/fraud-cases",
+      "parameters": [
+        { "name": "minSeverity", "value": "high" },
+        { "name": "pageSize", "value": "10" }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 1
+    },
+    {
+      "_id": "req_cases_by_transaction",
+      "_type": "request",
+      "parentId": "fld_fraud_cases",
+      "name": "Get by transaction ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/fraud-cases/by-transaction/{{ _.transaction_id }}",
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 2
+    },
+    {
+      "_id": "req_cases_summary",
+      "_type": "request",
+      "parentId": "fld_fraud_cases",
+      "name": "Summary (dashboard aggregate)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/fraud-cases/summary",
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 3
+    },
+    {
+      "_id": "req_cases_by_id",
+      "_type": "request",
+      "parentId": "fld_fraud_cases",
+      "name": "Get by ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/v1/fraud-cases/{{ _.fraud_case_id }}",
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 4
+    },
+    {
+      "_id": "req_cases_update_status",
+      "_type": "request",
+      "parentId": "fld_fraud_cases",
+      "name": "Update status (requires FraudAnalyst role)",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/api/v1/fraud-cases/{{ _.fraud_case_id }}/status",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"status\": \"confirmed\"\n}"
+      },
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 5
+    }
+  ]
+}

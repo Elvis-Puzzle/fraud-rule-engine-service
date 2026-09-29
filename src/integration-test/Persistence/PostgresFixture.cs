@@ -17,6 +17,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         .WithPassword("fraud_rule_engine")
         .Build();
 
+    /// <summary>
+    /// Exposed so other fixtures/tests (e.g. the Kafka-broker-backed messaging test)
+    /// </summary>
+    public string ConnectionString => _container.GetConnectionString();
+
     public ApplicationReadWriteContext CreateReadWriteContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationReadWriteContext>()
